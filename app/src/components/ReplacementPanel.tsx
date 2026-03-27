@@ -12,7 +12,10 @@ export default function ReplacementPanel({
     usedCount: number;
 }) {
     const [hovered, setHovered] = React.useState<string | null>(null);
-    const scrollRef = React.useRef<HTMLDivElement | null>(null);
+
+    // 移除滚动相关的ref和动画逻辑（不再需要横向滚动）
+    // scrollRef、rafRef、targetRef 全部删除
+    // animate、onWheel 函数也删除
 
     React.useEffect(() => {
         const onHover = (e: Event) => {
@@ -23,49 +26,24 @@ export default function ReplacementPanel({
         return () => window.removeEventListener("shanten:hover-tile", onHover as EventListener);
     }, []);
 
-    const rafRef = React.useRef<number | null>(null);
-    const targetRef = React.useRef(0);
-
-    const animate = React.useCallback(() => {
-        const el = scrollRef.current;
-        if (!el) return;
-        const current = el.scrollLeft;
-        const target = targetRef.current;
-        const diff = target - current;
-
-        if (Math.abs(diff) < 0.5) {
-            el.scrollLeft = target;
-            if (rafRef.current) cancelAnimationFrame(rafRef.current);
-            rafRef.current = null;
-            return;
-        }
-        el.scrollLeft = current + diff * 0.22; // 缓动系数：越大越快
-        rafRef.current = requestAnimationFrame(animate);
-    }, []);
-
-    const onWheel = (e: React.WheelEvent<HTMLDivElement>) => {
-        const el = scrollRef.current;
-        if (!el) return;
-        const multiplier = 1.3;
-        const max = el.scrollWidth - el.clientWidth;
-
-        targetRef.current = Math.max(0, Math.min(max, targetRef.current + e.deltaY * multiplier));
-        if (rafRef.current == null) rafRef.current = requestAnimationFrame(animate);
-        e.preventDefault();
-    };
-
-    React.useEffect(() => {
-        const el = scrollRef.current;
-        if (el) targetRef.current = el.scrollLeft;
-        return () => {
-            if (rafRef.current) cancelAnimationFrame(rafRef.current);
-        };
-    }, []);
-
     const lastIdx = Math.max(-1, usedCount - 1);
 
+    // 新增：将一维数组转为二维数组，每行9个元素
+    const getGridRows = () => {
+        const rows = [];
+        for (let i = 0; i < replacementTiles.length; i += 9) {
+            rows.push(replacementTiles.slice(i, i + 9));
+        }
+        return rows;
+    };
+    const tileRows = getGridRows();
+
     return (
-        <section className="mj-panel" style={{ marginTop: 12, overflowY: "hidden" }}>
+        <section className="mj-panel" style={{
+            marginTop: 12,
+            overflowY: "auto", // 纵向滚动（如果超过高度）
+            paddingBottom: 16 // 底部留白
+        }}>
             <div style={{ marginBottom: 8, display: "flex", alignItems: "baseline", gap: 8 }}>
                 <div style={{ fontWeight: 600 }}>替换序列</div>
                 <div style={{ fontSize: 12, color: "#6b7280" }}>
@@ -73,90 +51,96 @@ export default function ReplacementPanel({
                 </div>
             </div>
 
+            {/* 改造核心：网格布局，每行9张，居中展示 */}
             <div
-                ref={scrollRef}
-                onWheel={onWheel}
                 style={{
-                    display: "grid",
-                    gridAutoFlow: "column",
-                    gridAutoColumns: "min-content",
-                    gap: 10,
-                    overflowX: "auto",
-                    overflowY: "hidden",
-                    paddingRight: 5,
-                    paddingLeft: 5,
-                    paddingBottom: 8,
-                    paddingTop: 8,
-                    overscrollBehaviorX: "contain",
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center", // 整体居中
+                    gap: 12, // 行间距
                 }}
             >
-                {replacementTiles.map((t, idx) => {
-                    const used = idx <= lastIdx;
-                    return (
-                        <div key={`${t}-${idx}`} style={{ display: "grid", justifyItems: "center" }}>
-                            <div
-                                style={{
-                                    position: "relative",
-                                    borderRadius: 8,
-                                    outline: used ? "2px solid rgba(16,185,129,.85)" : "none",
-                                    outlineOffset: used ? 2 : 0,
-                                    marginBottom: 10,
-                                }}
-                                onMouseEnter={() => emitHover(t)}
-                                onMouseLeave={() => emitHover(null)}
-                                onClick={() => emitHover(t)}
-                                title={`${t}${used ? "（已替）" : ""}`}
-                            >
-                                <Tile
-                                    tile={t}
-                                    dim={false}
-                                    hoveredTile={hovered}
-                                    setHoveredTile={(x) => emitHover(x)}
-                                    width={54}
-                                    height={72}
-                                />
-
-                                {used && (
+                {tileRows.map((row, rowIdx) => (
+                    <div
+                        key={`row-${rowIdx}`}
+                        style={{
+                            display: "grid",
+                            gridTemplateColumns: "repeat(9, min-content)", // 每行9列
+                            gap: 10, // 列间距（和原有一致）
+                            justifyContent: "center", // 行内元素居中（最后一行不足9个时）
+                        }}
+                    >
+                        {row.map((t, colIdx) => {
+                            // 计算全局索引（行索引*9 + 列索引）
+                            const globalIdx = rowIdx * 9 + colIdx;
+                            const used = globalIdx <= lastIdx;
+                            return (
+                                <div key={`${t}-${globalIdx}`} style={{ display: "grid", justifyItems: "center" }}>
                                     <div
                                         style={{
-                                            position: "absolute",
-                                            top: "50%",
-                                            left: "50%",
-                                            transform: "translate(-50%, -50%)",
-                                            fontSize: 13,
-                                            fontWeight: 700,
-                                            color: "#fff",
-                                            background: "rgba(16,185,129,0.88)",
-                                            padding: "4px 10px",
+                                            position: "relative",
                                             borderRadius: 8,
-                                            boxShadow: "0 0 6px rgba(0,0,0,0.25)",
-                                            pointerEvents: "none",
+                                            outline: used ? "2px solid rgba(16,185,129,.85)" : "none",
+                                            outlineOffset: used ? 2 : 0,
+                                            marginBottom: 10,
                                         }}
+                                        onMouseEnter={() => emitHover(t)}
+                                        onMouseLeave={() => emitHover(null)}
+                                        onClick={() => emitHover(t)}
+                                        title={`${t}${used ? "（已替）" : ""}`}
                                     >
-                                        已替
-                                    </div>
-                                )}
-                            </div>
-
-                            <div style={{ height: 18, display: "grid", placeItems: "center" }}>
-                                {idx === lastIdx && usedCount > 0 && (
-                                    <div style={{ display: "grid", justifyItems: "center", gap: 2 }}>
-                                        <div
-                                            style={{
-                                                width: 0,
-                                                height: 0,
-                                                borderLeft: "6px solid transparent",
-                                                borderRight: "6px solid transparent",
-                                                borderTop: "8px solid rgba(59,130,246,.9)",
-                                            }}
+                                        <Tile
+                                            tile={t}
+                                            dim={false}
+                                            hoveredTile={hovered}
+                                            setHoveredTile={(x) => emitHover(x)}
+                                            width={54}
+                                            height={72}
                                         />
-                                        <div style={{ fontSize: 11, color: "rgba(59,130,246,.9)" }}>当前</div>
+
+                                        {used && (
+                                            <div
+                                                style={{
+                                                    position: "absolute",
+                                                    top: "50%",
+                                                    left: "50%",
+                                                    transform: "translate(-50%, -50%)",
+                                                    fontSize: 13,
+                                                    fontWeight: 700,
+                                                    color: "#fff",
+                                                    background: "rgba(16,185,129,0.88)",
+                                                    padding: "4px 10px",
+                                                    borderRadius: 8,
+                                                    boxShadow: "0 0 6px rgba(0,0,0,0.25)",
+                                                    pointerEvents: "none",
+                                                }}
+                                            >
+                                                已替
+                                            </div>
+                                        )}
                                     </div>
-                                )}
-                            </div>
-                        </div>
-                    );
-                })}
+
+                                    <div style={{ height: 18, display: "grid", placeItems: "center" }}>
+                                        {globalIdx === lastIdx && usedCount > 0 && (
+                                            <div style={{ display: "grid", justifyItems: "center", gap: 2 }}>
+                                                <div
+                                                    style={{
+                                                        width: 0,
+                                                        height: 0,
+                                                        borderLeft: "6px solid transparent",
+                                                        borderRight: "6px solid transparent",
+                                                        borderTop: "8px solid rgba(59,130,246,.9)",
+                                                    }}
+                                                />
+                                                <div style={{ fontSize: 11, color: "rgba(59,130,246,.9)" }}>当前</div>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                ))}
             </div>
         </section>
     );

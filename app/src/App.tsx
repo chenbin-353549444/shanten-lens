@@ -42,6 +42,9 @@ export default function App() {
     const [wallStatsTiles, setWallStatsTiles] = React.useState<string[]>([]);
 
     const [replacementTiles, setReplacementTiles] = React.useState<string[]>([]);
+    // 新增：手牌状态（和其他牌格式一致，字符串数组）
+    const [handTiles, setHandTiles] = React.useState<string[]>([]);
+
     const [switchUsedCount, setSwitchUsedCount] = React.useState<number>(0);
 
     const [speedData, setSpeedData] = React.useState<ChiitoiData | null>(null);
@@ -75,6 +78,12 @@ export default function App() {
                     : 0;
                 setReplacementTiles(repl);
                 setSwitchUsedCount(used);
+
+                // 新增：解析手牌数据（从 d.hand_tiles 提取 ID，转成牌面字符串）
+                const handList = Array.isArray(d.hand_tiles)
+                    ? d.hand_tiles.map((id) => deck.get(id) ?? "5m") // ID 转牌面，兜底默认"5m"
+                    : [];
+                setHandTiles(handList); // 更新手牌状态
 
                 const wallList = Array.isArray(d.wall_tiles)
                     ? d.wall_tiles.map((id) => deck.get(id) ?? "5m")
@@ -246,7 +255,13 @@ export default function App() {
                             </div>
                         </div>
 
-                        <div style={{flex: "0 0 auto", width: "auto", marginRight: 0,}}><WallStats wallTiles={wallStatsTiles}/></div>
+                        <div style={{flex: "0 0 auto", width: "auto", marginRight: 0,}}>
+                            <WallStats
+                                wallTiles={wallStatsTiles}
+                                replacementTiles={replacementTiles}
+                                handTiles={handTiles} // 新增：传入手牌数组
+                            />
+                        </div>
                     </div>
                 )}
 

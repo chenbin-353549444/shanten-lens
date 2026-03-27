@@ -4,6 +4,8 @@ import styles from "./WallStats.module.css";
 
 export interface WallStatsProps {
     wallTiles: string[];
+    replacementTiles: string[];
+    handTiles: string[];
     className?: string;
 }
 
@@ -45,28 +47,6 @@ function keyToReadable(key: string): string {
     return key;
 }
 
-/** 同花色排序值：0（赤五）紧随 5 之后，以 5.1 处理 */
-function valueSortNumber(v: number): number {
-    return v === 0 ? 5.1 : v;
-}
-
-/** 排序：m→p→s→z；同花色数值升序，赤五紧跟五 */
-function sortKey(a: string, b: string): number {
-    const order: Record<string, number> = { m: 0, p: 1, s: 2, z: 3 };
-    const na = normalize(a);
-    const nb = normalize(b);
-    const sa = na[0], sb = nb[0];
-    if (sa !== sb) return (order[sa] ?? 9) - (order[sb] ?? 9);
-    const va = Number(na.slice(1));
-    const vb = Number(nb.slice(1));
-    const knownA = /^[mps][0-9]$/.test(na) || /^z[1-7]$/.test(na);
-    const knownB = /^[mps][0-9]$/.test(nb) || /^z[1-7]$/.test(nb);
-    if (knownA && knownB) return valueSortNumber(va) - valueSortNumber(vb);
-    if (knownA) return -1;
-    if (knownB) return 1;
-    return na.localeCompare(nb);
-}
-
 /** 等价组：普通五 ↔ 赤五；其他牌仅自身 */
 function eqGroup(tile: string): string[] {
     const t = normalize(tile);
@@ -86,37 +66,80 @@ function emitHover(tile: string | null) {
     window.dispatchEvent(new CustomEvent("shanten:hover-tile-eq", { detail: group }));
 }
 
-export default function WallStats({ wallTiles, className }: WallStatsProps) {
+export default function WallStats({ wallTiles, replacementTiles, handTiles, className }: WallStatsProps) {
+    console.log(wallTiles)
+    console.log(replacementTiles)
+    console.log(handTiles)
+    // 核心改造：统计牌山前2张 + 手牌 + 替换牌的总数量，以及替换牌中最后一张的位置
     const list = useMemo(() => {
-        const map = new Map<string, { count: number; sample: string }>();
-        for (const t of wallTiles) {
+        // 1. 提取牌山前2张（注意处理空数组情况）
+        const wallTop2 = wallTiles.slice(0, 2);
+        // 2. 合并所有需要统计的牌：牌山前2张 + 手牌 + 替换牌
+        const allTiles = [...wallTop2, ...handTiles, ...replacementTiles];
+        // 3. 预处理替换牌：建立「归一化牌名 → 所有索引数组」的映射
+        const replacementTileIndexMap = new Map<string, number[]>();
+        replacementTiles.forEach((tile, index) => {
+            const normTile = normalize(tile);
+            if (!replacementTileIndexMap.has(normTile)) {
+                replacementTileIndexMap.set(normTile, []);
+            }
+            replacementTileIndexMap.get(normTile)!.push(index + 1); // 位置从1开始计数（用户更易理解）
+        });
+
+        // 4. 统计总数量 + 提取替换牌最后一张位置（默认0）
+        const map = new Map<string, {
+            count: number;
+            sample: string;
+            lastReplacementPos: number; // 改为number类型，默认0
+        }>();
+
+        for (const t of allTiles) {
             const k = normalize(t);
             const cur = map.get(k);
-            if (cur) cur.count += 1;
-            else map.set(k, { count: 1, sample: t });
+            if (cur) {
+                cur.count += 1;
+            } else {
+                // 获取该牌在替换牌中最后一张的位置，无则为0
+                const posList = replacementTileIndexMap.get(k) || [];
+                const lastPos = posList.length > 0 ? posList[posList.length - 1] : 0;
+                map.set(k, {
+                    count: 1,
+                    sample: t,
+                    lastReplacementPos: lastPos
+                });
+            }
         }
+
+        // 5. 新排序规则：1. count倒序 2. lastReplacementPos正序
         return Array.from(map.entries())
-            .sort((a, b) => sortKey(a[0], b[0]))
+            .sort((a, b) => {
+                // 先按数量倒序
+                const countDiff = b[1].count - a[1].count;
+                if (countDiff !== 0) return countDiff;
+                // 数量相同时，按替换牌位置正序
+                return a[1].lastReplacementPos - b[1].lastReplacementPos;
+            })
             .map(([key, v]) => ({
                 key,
                 sample: v.sample,
                 readable: keyToReadable(key),
                 count: v.count,
+                lastReplacementPos: v.lastReplacementPos
             }));
-    }, [wallTiles]);
+    }, [wallTiles, replacementTiles, handTiles]); // 依赖所有数据源
 
     return (
         <aside className={[styles.wrap, className].filter(Boolean).join(" ")}>
             <div className={`mj-panel ${styles.panel}`}>
                 <div className={styles.header}>
-                    <div className={styles.title}>牌山统计</div>
+                    <div className={styles.title}>花火统计</div>
                 </div>
 
                 <div className={styles.list}>
                     {list.length === 0 ? (
-                        <div className={styles.empty}>当前无可摸牌</div>
+                        <div className={styles.empty}>当前无可统计牌</div>
                     ) : (
-                        list.map(({ key, sample, readable, count }) => (
+                        list.map(({ key, sample, readable, count, lastReplacementPos }) => (
                             <div
                                 className={styles.item}
                                 key={key}
@@ -136,7 +159,10 @@ export default function WallStats({ wallTiles, className }: WallStatsProps) {
                                 </div>
                                 <div className={styles.meta}>
                                     <div className={styles.name}>{readable}</div>
-                                    <div className={styles.subtext}>还能摸到</div>
+                                    {/* 改造：展示文本改为 换：X张 / 换0张 */}
+                                    <div className={styles.subtext}>
+                                        {`换：${lastReplacementPos}张`}
+                                    </div>
                                 </div>
                                 <div className={styles.count}>×{count}</div>
                             </div>
