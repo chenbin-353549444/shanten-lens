@@ -32,6 +32,11 @@ def _now_wall_ms() -> int:
 def _now_mono_ms() -> int:
     return int(time.monotonic() * 1000)
 
+# 🔥 强制修复中文电脑名问题（唯一加的代码）
+original_gethostname = socket.gethostname
+def get_hostname():
+    return "localhost"  # 纯英文主机名
+socket.gethostname = get_hostname
 
 SMTP_TIMEOUT_SEC = 12
 NEED_PIONNER_BADGE_COUNT = 4
